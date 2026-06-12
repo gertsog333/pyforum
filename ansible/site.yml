@@ -1,0 +1,26 @@
+---
+# =============================================================================
+# PyForum — главный playbook
+# Запускает роли по очереди: сначала dbserver, потом appserver
+#
+# Запуск всего стека:
+#   ansible-playbook -i inventory/hosts.ini site.yml
+#
+# Запуск только одной роли (через теги):
+#   ansible-playbook -i inventory/hosts.ini site.yml --tags dbserver
+#   ansible-playbook -i inventory/hosts.ini site.yml --tags appserver
+# =============================================================================
+
+- name: Setup PyForum DB Server
+  hosts: dbservers
+  become: true
+  roles:
+    - role: dbserver
+      tags: [dbserver]
+
+- name: Setup PyForum App Server
+  hosts: appservers
+  become: true
+  roles:
+    - role: appserver
+      tags: [appserver]

@@ -1,0 +1,109 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+Vagrant.configure("2") do |config|
+
+  # Oracle Linux 9 (официальный box от Oracle)
+  config.vm.box = "oraclelinux/9"
+  config.vm.box_url = "https://oracle.github.io/vagrant-projects/boxes/oraclelinux/9.json"
+
+  config.vm.hostname = "pyforum-dev"
+
+  # Пробрасываем порты:
+  #   8000 — Django/Gunicorn
+  #   5432 — PostgreSQL (опционально, для доступа с хоста)
+  config.vm.network "forwarded_port", guest: 8000, host: 8000
+  config.vm.network "forwarded_port", guest: 5432, host: 55432
+
+  # Приватная сеть — чтобы VM была доступна по IP с хоста
+  config.vm.network "private_network", ip: "192.168.56.10"
+
+  # Синхронизация папки проекта в VM
+  # Хост: папка с Vagrantfile  →  VM: /home/vagrant/pyforum
+  config.vm.synced_folder ".", "/home/vagrant/pyforum"
+
+  # Настройки VirtualBox
+  config.vm.provider "virtualbox" do |vb|
+    vb.name   = "pyforum-oracle9"
+    vb.memory = "2048"   # 2 GB RAM
+    vb.cpus   = 2
+  end
+
+  # Provision-скрипт — выполняется один раз при `vagrant up`
+  config.vm.provision "shell", inline: <<-SHELL
+
+    echo "==> Обновляем систему"
+    dnf update -y -q
+
+    echo "==> Устанавливаем зависимости"
+    dnf install -y python3 python3-pip python3-devel \
+                   postgresql postgresql-server postgresql-devel \
+                   gcc make git
+
+    echo "==> Инициализируем PostgreSQL"
+    postgresql-setup --initdb
+
+    # Разрешаем аутентификацию по паролю (md5) вместо ident
+    sed -i 's/ident/md5/g' /var/lib/pgsql/data/pg_hba.conf
+
+    echo "==> Запускаем PostgreSQL и добавляем в автозагрузку"
+    systemctl enable --now postgresql
+
+    echo "==> Создаём БД и пользователя"
+    sudo -u postgres psql -c "CREATE USER postgres WITH PASSWORD 'postgres';" 2>/dev/null || true
+    sudo -u postgres psql -c "ALTER USER postgres WITH PASSWORD 'postgres';" 2>/dev/null || true
+    sudo -u postgres psql -c "CREATE DATABASE forum OWNER postgres;" 2>/dev/null || true
+
+    echo "==> Устанавливаем Python-зависимости проекта"
+    cd /home/vagrant/pyforum
+    pip3 install -r requirements.txt
+
+    echo "==> Создаём .env файл (если не существует)"
+    if [ ! -f /home/vagrant/pyforum/.env ]; then
+      cat > /home/vagrant/pyforum/.env <<EOF
+SECRET_KEY=dev-secret-key-change-in-production
+PG_DB=forum
+PG_USER=postgres
+PG_PASSWORD=postgres
+DB_HOST=localhost
+DB_PORT=5432
+DB_PORT_OUT=55432
+PGADMIN_EMAIL=admin@admin.com
+PGADMIN_PASSWORD=admin
+EMAIL_BACKEND=django.core.mail.backends.console.EmailBackend
+EMAIL_HOST=localhost
+EMAIL_PORT=587
+EMAIL_USE_TLS=1
+EMAIL_HOST_USER=test@test.com
+EMAIL_HOST_PASSWORD=password
+CORS_ORIGIN_WHITELIST=http://localhost
+EOF
+    fi
+
+    echo "==> Создаём папку для логов"
+    mkdir -p /home/vagrant/pyforum/logs
+
+    echo "==> Создаём миграции для приложений проекта"
+    cd /home/vagrant/pyforum
+    python3 manage.py makemigrations authentication profiles administration
+
+    echo "==> Применяем миграции Django"
+    python3 manage.py migrate
+
+    echo "==> Собираем статику"
+    python3 manage.py collectstatic --noinput
+
+    echo ""
+    echo "============================================"
+    echo "  Готово! Проект развёрнут."
+    echo "  Для запуска:"
+    echo "    vagrant ssh"
+    echo "    cd /home/vagrant/pyforum"
+    echo "    python3 manage.py runserver 0.0.0.0:8000"
+    echo ""
+    echo "  Доступно на хосте: http://localhost:8000"
+    echo "============================================"
+
+  SHELL
+
+end

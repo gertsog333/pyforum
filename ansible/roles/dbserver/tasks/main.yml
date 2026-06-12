@@ -1,0 +1,82 @@
+---
+# =============================================================================
+# Role: dbserver
+# Устанавливает и настраивает PostgreSQL
+# Переменные: ansible/inventory/group_vars/dbservers.yml
+# =============================================================================
+
+- name: Update system packages
+  ansible.builtin.dnf:
+    name: "*"
+    state: latest
+    update_only: true
+
+- name: Install PostgreSQL
+  ansible.builtin.dnf:
+    name:
+      - postgresql
+      - postgresql-server
+    state: present
+
+- name: Check if PostgreSQL is already initialized
+  ansible.builtin.stat:
+    path: /var/lib/pgsql/data/PG_VERSION
+  register: pg_initialized
+
+- name: Initialize PostgreSQL
+  ansible.builtin.command: postgresql-setup --initdb
+  when: not pg_initialized.stat.exists
+
+- name: Configure authentication - replace ident with md5
+  ansible.builtin.replace:
+    path: /var/lib/pgsql/data/pg_hba.conf
+    regexp: 'ident'
+    replace: 'md5'
+
+- name: Configure PostgreSQL to listen on all interfaces
+  ansible.builtin.lineinfile:
+    path: /var/lib/pgsql/data/postgresql.conf
+    regexp: "^#listen_addresses = 'localhost'"
+    line: "listen_addresses = '*'"
+
+- name: Allow connections from app-server
+  ansible.builtin.lineinfile:
+    path: /var/lib/pgsql/data/pg_hba.conf
+    line: "host    {{ db_name }}    {{ db_user }}    {{ app_server_ip }}/32    md5"
+
+- name: Start and enable PostgreSQL
+  ansible.builtin.systemd:
+    name: postgresql
+    state: started
+    enabled: true
+
+- name: Create database user
+  ansible.builtin.shell: |
+    sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='{{ db_user }}'" | grep -q 1 || \
+    sudo -u postgres psql -c "CREATE USER {{ db_user }} WITH PASSWORD '{{ db_password }}';"
+  args:
+    executable: /bin/bash
+
+- name: Create database
+  ansible.builtin.shell: |
+    sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='{{ db_name }}'" | grep -q 1 || \
+    sudo -u postgres psql -c "CREATE DATABASE {{ db_name }} OWNER {{ db_user }};"
+  args:
+    executable: /bin/bash
+
+- name: Grant privileges on database
+  ansible.builtin.shell: |
+    sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE {{ db_name }} TO {{ db_user }};"
+  args:
+    executable: /bin/bash
+
+- name: Print DB server summary
+  ansible.builtin.debug:
+    msg:
+      - "============================================"
+      - "[DB] PostgreSQL is ready."
+      - "Host: {{ ansible_host }}:5432"
+      - "DB:   {{ db_name }}"
+      - "User: {{ db_user }}"
+      - "App server allowed: {{ app_server_ip }}"
+      - "============================================"

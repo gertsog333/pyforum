@@ -1,0 +1,21 @@
+---
+# =============================================================================
+# DB Server variables
+# Секреты читаются из HashiCorp Vault (KV v2, путь secret/pyforum/db)
+# Vault dev mode использует KV v2: API путь secret/data/pyforum/db
+# =============================================================================
+
+# Несекретные переменные — задаём напрямую
+db_name: forum
+app_server_ip: 192.168.56.10
+
+# Секреты из Vault (KV v2 — путь содержит /data/)
+db_user: "{{ lookup('community.hashi_vault.hashi_vault',
+               'secret=secret/data/pyforum/db:db_user
+                url=http://192.168.56.40:8200
+                token=root') }}"
+
+db_password: "{{ lookup('community.hashi_vault.hashi_vault',
+                   'secret=secret/data/pyforum/db:db_password
+                    url=http://192.168.56.40:8200
+                    token=root') }}"

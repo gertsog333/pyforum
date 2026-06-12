@@ -1,0 +1,152 @@
+---
+# =============================================================================
+# PyForum App Server Playbook
+# Устанавливает Django + Gunicorn, применяет миграции, запускает приложение
+# Запуск: ansible-playbook -i inventory/hosts.ini playbooks/appserver.yml
+# NOTE: dbserver must be running before executing this playbook!
+# =============================================================================
+
+- name: Setup PyForum App Server
+  hosts: appservers
+  become: true
+
+  tasks:
+
+    - name: Check that dbserver is reachable
+      ansible.builtin.wait_for:
+        host: "{{ db_host }}"
+        port: "{{ db_port }}"
+        timeout: 30
+        msg: "DB server {{ db_host }}:{{ db_port }} is not available. Make sure dbserver is running."
+
+    - name: Check that project directory exists
+      ansible.builtin.stat:
+        path: "{{ project_dir }}"
+      register: project_dir_stat
+
+    - name: Fail if project directory does not exist
+      ansible.builtin.fail:
+        msg: "Project directory '{{ project_dir }}' does not exist. Make sure Vagrant has mounted the shared folder."
+      when: not project_dir_stat.stat.exists
+
+    - name: Update system packages
+      ansible.builtin.dnf:
+        name: "*"
+        state: latest
+        update_only: true
+
+    - name: Install dependencies
+      ansible.builtin.dnf:
+        name:
+          - python3
+          - python3-pip
+          - python3-devel
+          - postgresql
+          - postgresql-devel
+          - gcc
+          - make
+          - git
+        state: present
+
+    - name: Install Python dependencies from requirements.txt
+      ansible.builtin.pip:
+        requirements: "{{ project_dir }}/requirements.txt"
+        executable: pip3
+
+    - name: Create .env file
+      ansible.builtin.copy:
+        dest: "{{ project_dir }}/.env"
+        content: |
+          SECRET_KEY={{ app_secret_key }}
+          PG_DB={{ db_name }}
+          PG_USER={{ db_user }}
+          PG_PASSWORD={{ db_password }}
+          DB_HOST={{ db_host }}
+          DB_PORT={{ db_port }}
+          DB_PORT_OUT=55432
+          PGADMIN_EMAIL={{ pgadmin_email }}
+          PGADMIN_PASSWORD={{ pgadmin_password }}
+          EMAIL_BACKEND=django.core.mail.backends.console.EmailBackend
+          EMAIL_HOST=localhost
+          EMAIL_PORT=587
+          EMAIL_USE_TLS=1
+          EMAIL_HOST_USER={{ email_host_user }}
+          EMAIL_HOST_PASSWORD={{ email_host_password }}
+          CORS_ORIGIN_WHITELIST=http://192.168.56.10
+        owner: "{{ app_user }}"
+        mode: '0600'
+
+    - name: Create logs directory
+      ansible.builtin.file:
+        path: "{{ project_dir }}/logs"
+        state: directory
+        owner: "{{ app_user }}"
+        mode: '0755'
+
+    - name: Create Django migrations for authentication
+      ansible.builtin.command:
+        cmd: python3 manage.py makemigrations authentication
+        chdir: "{{ project_dir }}"
+      become_user: "{{ app_user }}"
+
+    - name: Create Django migrations for profiles
+      ansible.builtin.command:
+        cmd: python3 manage.py makemigrations profiles
+        chdir: "{{ project_dir }}"
+      become_user: "{{ app_user }}"
+
+    - name: Create Django migrations for administration
+      ansible.builtin.command:
+        cmd: python3 manage.py makemigrations administration
+        chdir: "{{ project_dir }}"
+      become_user: "{{ app_user }}"
+
+    - name: Apply Django migrations
+      ansible.builtin.command:
+        cmd: python3 manage.py migrate
+        chdir: "{{ project_dir }}"
+      become_user: "{{ app_user }}"
+
+    - name: Collect static files
+      ansible.builtin.command:
+        cmd: python3 manage.py collectstatic --noinput
+        chdir: "{{ project_dir }}"
+      become_user: "{{ app_user }}"
+
+    - name: Create systemd service for gunicorn
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/pyforum.service
+        content: |
+          [Unit]
+          Description=PyForum Django Application
+          After=network.target
+
+          [Service]
+          User={{ app_user }}
+          WorkingDirectory={{ project_dir }}
+          ExecStart=/usr/local/bin/gunicorn forum-sandbox.wsgi:application --bind 0.0.0.0:8000 --workers 2
+          Restart=always
+          RestartSec=5
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Reload systemd daemon
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Start and enable pyforum service
+      ansible.builtin.systemd:
+        name: pyforum
+        state: started
+        enabled: true
+
+    - name: Print App server summary
+      ansible.builtin.debug:
+        msg:
+          - "============================================"
+          - "[APP] Application is running!"
+          - "Available at: http://{{ ansible_host }}:8000"
+          - "DB: {{ db_host }}:{{ db_port }}/{{ db_name }}"
+          - "Project: {{ project_dir }}"
+          - "============================================"

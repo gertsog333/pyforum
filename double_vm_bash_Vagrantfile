@@ -1,0 +1,159 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+Vagrant.configure("2") do |config|
+
+  # Общий box для обеих VM
+  config.vm.box = "oraclelinux/9"
+  config.vm.box_url = "https://oracle.github.io/vagrant-projects/boxes/oraclelinux/9.json"
+
+  # ==========================================================================
+  # VM 1: DB-сервер (PostgreSQL)
+  # Поднимается первой — к моменту старта app-сервера БД уже готова
+  # ==========================================================================
+  config.vm.define "dbserver" do |db|
+
+    db.vm.hostname = "pyforum-oracle9-pgsqldbserver"
+    db.vm.network "private_network", ip: "192.168.56.20"
+
+    db.vm.provider "virtualbox" do |vb|
+      vb.name   = "pyforum-oracle9-pgsqldbserver"
+      vb.memory = "1024"
+      vb.cpus   = 1
+    end
+
+    db.vm.provision "shell", inline: <<-SHELL
+
+      echo "==> [DB] Updating system"
+      dnf update -y -q
+
+      echo "==> [DB] Installing PostgreSQL"
+      dnf install -y postgresql postgresql-server
+
+      echo "==> [DB] Initializing PostgreSQL"
+      postgresql-setup --initdb
+
+      echo "==> [DB] Configuring authentication (md5)"
+      sed -i 's/ident/md5/g' /var/lib/pgsql/data/pg_hba.conf
+
+      echo "==> [DB] Allowing connections from app-server (192.168.56.10)"
+      # PostgreSQL по умолчанию слушает только localhost — меняем на все интерфейсы
+      sed -i "s/#listen_addresses = 'localhost'/listen_addresses = '*'/" /var/lib/pgsql/data/postgresql.conf
+      # Разрешаем подключение с IP app-сервера
+      echo "host    forum    pyforum_user    192.168.56.10/32    md5" >> /var/lib/pgsql/data/pg_hba.conf
+
+      echo "==> [DB] Starting PostgreSQL and enabling on boot"
+      systemctl enable --now postgresql
+
+      echo "==> [DB] Creating database user and database"
+      sudo -u postgres psql -c "CREATE USER pyforum_user WITH PASSWORD 'pyforum_pass';" 2>/dev/null || true
+      sudo -u postgres psql -c "CREATE DATABASE forum OWNER pyforum_user;" 2>/dev/null || true
+      sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE forum TO pyforum_user;" 2>/dev/null || true
+
+      echo ""
+      echo "============================================"
+      echo "  [DB] PostgreSQL is ready."
+      echo "  Host: 192.168.56.20:5432"
+      echo "  DB:   forum"
+      echo "  User: pyforum_user"
+      echo "============================================"
+
+    SHELL
+  end
+
+  # ==========================================================================
+  # VM 2: App-сервер (Django)
+  # Поднимается второй — БД уже готова и слушает подключения
+  # ==========================================================================
+  config.vm.define "appserver" do |app|
+
+    app.vm.hostname = "pyforum-oracle9-appserver"
+    app.vm.network "private_network", ip: "192.168.56.10"
+    app.vm.network "forwarded_port", guest: 8000, host: 8000
+
+    # Папка проекта с хоста монтируется в VM
+    app.vm.synced_folder ".", "/home/vagrant/pyforum"
+
+    app.vm.provider "virtualbox" do |vb|
+      vb.name   = "pyforum-oracle9-appserver"
+      vb.memory = "1024"
+      vb.cpus   = 1
+    end
+
+    app.vm.provision "shell", inline: <<-SHELL
+
+      echo "==> [APP] Updating system"
+      dnf update -y -q
+
+      echo "==> [APP] Installing dependencies"
+      dnf install -y python3 python3-pip python3-devel \
+                     postgresql-devel gcc make git
+
+      echo "==> [APP] Installing Python dependencies"
+      cd /home/vagrant/pyforum
+      pip3 install -r requirements.txt
+
+      echo "==> [APP] Creating .env file"
+      cat > /home/vagrant/pyforum/.env <<EOF
+SECRET_KEY=dev-secret-key-change-in-production
+PG_DB=forum
+PG_USER=pyforum_user
+PG_PASSWORD=pyforum_pass
+DB_HOST=192.168.56.20
+DB_PORT=5432
+DB_PORT_OUT=55432
+PGADMIN_EMAIL=admin@admin.com
+PGADMIN_PASSWORD=admin
+EMAIL_BACKEND=django.core.mail.backends.console.EmailBackend
+EMAIL_HOST=localhost
+EMAIL_PORT=587
+EMAIL_USE_TLS=1
+EMAIL_HOST_USER=test@test.com
+EMAIL_HOST_PASSWORD=password
+CORS_ORIGIN_WHITELIST=http://192.168.56.10
+EOF
+
+      echo "==> [APP] Creating logs directory"
+      mkdir -p /home/vagrant/pyforum/logs
+
+      echo "==> [APP] Creating migrations"
+      cd /home/vagrant/pyforum
+      python3 manage.py makemigrations authentication profiles administration
+
+      echo "==> [APP] Applying migrations"
+      python3 manage.py migrate
+
+      echo "==> [APP] Collecting static files"
+      python3 manage.py collectstatic --noinput
+
+      echo "==> [APP] Creating systemd service for autostart"
+      cat > /etc/systemd/system/pyforum.service <<EOF
+[Unit]
+Description=PyForum Django Application
+After=network.target
+
+[Service]
+User=vagrant
+WorkingDirectory=/home/vagrant/pyforum
+ExecStart=/usr/local/bin/gunicorn forum-sandbox.wsgi:application --bind 0.0.0.0:8000 --workers 2
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+      systemctl daemon-reload
+      systemctl enable --now pyforum
+
+      echo ""
+      echo "============================================"
+      echo "  [APP] Application is running!"
+      echo "  Available at: http://192.168.56.10:8000"
+      echo "  or: http://localhost:8000"
+      echo "============================================"
+
+    SHELL
+  end
+
+end

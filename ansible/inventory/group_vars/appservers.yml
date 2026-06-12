@@ -1,0 +1,52 @@
+---
+# =============================================================================
+# App Server variables
+# Секреты читаются из HashiCorp Vault
+#   secret/pyforum/db  — учётные данные БД
+#   secret/pyforum/app — секреты приложения
+# Vault dev mode использует KV v2: API путь secret/data/<path>
+# =============================================================================
+
+# Несекретные переменные — задаём напрямую
+project_dir: /home/vagrant/pyforum
+app_user: vagrant
+db_host: 192.168.56.20
+db_port: 5432
+db_name: forum
+
+# Секреты БД из Vault (KV v2 — путь содержит /data/)
+db_user: "{{ lookup('community.hashi_vault.hashi_vault',
+               'secret=secret/data/pyforum/db:db_user
+                url=http://192.168.56.40:8200
+                token=root') }}"
+
+db_password: "{{ lookup('community.hashi_vault.hashi_vault',
+                   'secret=secret/data/pyforum/db:db_password
+                    url=http://192.168.56.40:8200
+                    token=root') }}"
+
+# Секреты приложения из Vault (KV v2 — путь содержит /data/)
+app_secret_key: "{{ lookup('community.hashi_vault.hashi_vault',
+                       'secret=secret/data/pyforum/app:secret_key
+                        url=http://192.168.56.40:8200
+                        token=root') }}"
+
+pgadmin_email: "{{ lookup('community.hashi_vault.hashi_vault',
+                     'secret=secret/data/pyforum/app:pgadmin_email
+                      url=http://192.168.56.40:8200
+                      token=root') }}"
+
+pgadmin_password: "{{ lookup('community.hashi_vault.hashi_vault',
+                        'secret=secret/data/pyforum/app:pgadmin_password
+                         url=http://192.168.56.40:8200
+                         token=root') }}"
+
+email_host_user: "{{ lookup('community.hashi_vault.hashi_vault',
+                       'secret=secret/data/pyforum/app:email_host_user
+                        url=http://192.168.56.40:8200
+                        token=root') }}"
+
+email_host_password: "{{ lookup('community.hashi_vault.hashi_vault',
+                           'secret=secret/data/pyforum/app:email_host_password
+                            url=http://192.168.56.40:8200
+                            token=root') }}"
