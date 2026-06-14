@@ -1,0 +1,40 @@
+# =============================================================================
+# .dockerignore — исключает ненужные файлы из Docker build context
+# =============================================================================
+
+# Git
+.git/
+.gitignore
+
+# Vagrant (содержит приватные SSH ключи и состояние VM)
+.vagrant/
+*Vagrantfile
+single_vm_Vagrantfile
+double_vm_bash_Vagrantfile
+triple_vm_ansible_Vagrantfile
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Django
+.env
+*.log
+logs/
+
+# DevOps (не нужны в Docker image)
+ansible/
+DevOps_Scripts/
+
+# IDE
+.idea/
+.vscode/
+*.DS_Store

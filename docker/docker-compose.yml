@@ -1,0 +1,122 @@
+# =============================================================================
+# docker/docker-compose.yml — PyForum Docker stack
+#
+# Services (startup order):
+#   1. vault      — HashiCorp Vault dev mode (secrets storage)
+#   2. db         — PostgreSQL 13
+#   3. vault-init — writes secrets to Vault once, then exits
+#   4. app        — Django + Gunicorn (reads secrets from Vault at startup)
+#
+# Run from the docker/ directory:
+#   docker compose --env-file .env.docker up --build
+#
+# Exposed ports on the host:
+#   8000 — Django application
+#   8200 — Vault UI (http://localhost:8200, token: root)
+# =============================================================================
+
+volumes:
+  pyforum_postgres:
+  pyforum_media:
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Vault — HashiCorp Vault in dev mode
+  #   - Auto-initialised and unsealed
+  #   - Root token = root (set via VAULT_DEV_ROOT_TOKEN_ID)
+  #   - KV v2 enabled at secret/ by default
+  # ---------------------------------------------------------------------------
+  vault:
+    image: hashicorp/vault:latest
+    container_name: pyforum_vault
+    ports:
+      - "8200:8200"
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: root
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    cap_add:
+      - IPC_LOCK
+    healthcheck:
+      test: ["CMD", "vault", "status", "-address=http://127.0.0.1:8200"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL 13
+  # ---------------------------------------------------------------------------
+  db:
+    image: postgres:13
+    container_name: pyforum_db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pyforum_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # ---------------------------------------------------------------------------
+  # Vault Init — writes secrets to Vault exactly once, then exits (restart: no)
+  # Mounts vault-init.sh from the same docker/ directory
+  # ---------------------------------------------------------------------------
+  vault-init:
+    image: hashicorp/vault:latest
+    container_name: pyforum_vault_init
+    restart: "no"
+    environment:
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN: ${VAULT_TOKEN}
+      VAULT_DB_NAME: ${VAULT_DB_NAME}
+      VAULT_DB_USER: ${VAULT_DB_USER}
+      VAULT_DB_PASSWORD: ${VAULT_DB_PASSWORD}
+      VAULT_SECRET_KEY: ${VAULT_SECRET_KEY}
+      VAULT_PGADMIN_EMAIL: ${VAULT_PGADMIN_EMAIL}
+      VAULT_PGADMIN_PASSWORD: ${VAULT_PGADMIN_PASSWORD}
+      VAULT_EMAIL_HOST_USER: ${VAULT_EMAIL_HOST_USER}
+      VAULT_EMAIL_HOST_PASSWORD: ${VAULT_EMAIL_HOST_PASSWORD}
+    volumes:
+      - ./vault-init.sh:/vault-init.sh:ro
+    command: ["sh", "/vault-init.sh"]
+    depends_on:
+      vault:
+        condition: service_healthy
+
+  # ---------------------------------------------------------------------------
+  # App — Django + Gunicorn
+  #   Build context is the project root (..) so Docker can copy the full source.
+  #   Secrets are fetched from Vault inside entrypoint.sh at container start.
+  # ---------------------------------------------------------------------------
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: pyforum_app
+    ports:
+      - "8000:8000"
+    environment:
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN: ${VAULT_TOKEN}
+      DB_HOST: db
+      DB_PORT: "5432"
+      CORS_ORIGIN_WHITELIST: ${CORS_ORIGIN_WHITELIST}
+      EMAIL_BACKEND: ${EMAIL_BACKEND}
+      EMAIL_HOST: ${EMAIL_HOST}
+      EMAIL_PORT: ${EMAIL_PORT}
+      EMAIL_USE_TLS: ${EMAIL_USE_TLS}
+    volumes:
+      - pyforum_media:/app/media
+    depends_on:
+      vault:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+      vault-init:
+        condition: service_completed_successfully

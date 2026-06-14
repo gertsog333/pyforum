@@ -1,0 +1,49 @@
+# =============================================================================
+# docker/Vagrantfile — Single VM with Docker + Docker Compose
+#
+# Stage 5: Docker deployment on a clean Oracle Linux 9 VM
+#
+# VM info:
+#   Name:  pyforum-docker-host
+#   IP:    192.168.56.50
+#   RAM:   2 GB  (Docker needs more than the 1 GB used in earlier stages)
+#   CPUs:  2
+#
+# The project root is mounted into the VM at /home/vagrant/pyforum/
+# (Vagrantfile is in docker/, so ".." is the project root)
+#
+# Usage:
+#   cd docker
+#   vagrant up
+#   vagrant ssh
+#   cd /home/vagrant/pyforum/docker
+#   docker compose --env-file .env.docker up --build
+#
+# Access the app at:
+#   http://localhost:8000   (forwarded from VM)
+#   http://localhost:8200   (Vault UI, token: root)
+# =============================================================================
+
+Vagrant.configure("2") do |config|
+  config.vm.box = "oraclelinux/9"
+  config.vm.box_url = "https://oracle.github.io/vagrant-projects/boxes/oraclelinux/9.json"
+
+  config.vm.define "docker-host" do |docker|
+    docker.vm.hostname = "pyforum-docker-host"
+    docker.vm.network "private_network", ip: "192.168.56.50"
+    docker.vm.network "forwarded_port", guest: 8000, host: 8000
+    docker.vm.network "forwarded_port", guest: 8200, host: 8200
+
+    # Mount the project root (one level up from this Vagrantfile)
+    docker.vm.synced_folder "..", "/home/vagrant/pyforum"
+
+    docker.vm.provider "virtualbox" do |vb|
+      vb.name   = "pyforum-docker-host"
+      vb.memory = "2048"
+      vb.cpus   = 2
+    end
+
+    # Provision: install Docker CE + Docker Compose plugin from official repo
+    docker.vm.provision "shell", path: "../DevOps_Scripts/pyforum-provision-docker.sh"
+  end
+end
