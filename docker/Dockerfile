@@ -11,21 +11,19 @@
 # ---- Stage 1: Builder -------------------------------------------------------
 FROM python:3.11-slim AS builder
 
-# gcc + libpq-dev are needed to compile psycopg2 from source
-RUN apt-get update && apt-get install -y \
-    gcc \
-    libpq-dev \
-    --no-install-recommends \
-    && rm -rf /var/lib/apt/lists/*
+# No gcc/libpq-dev needed — we use psycopg2-binary (pre-compiled wheel)
 
 WORKDIR /build
 
-# Install Python deps into an isolated virtual env
+# Install Python deps into an isolated virtual env.
+# requirements.txt contains both psycopg2 (source) and psycopg2-binary (wheel).
+# In Docker we skip the source package and use only the binary version.
 COPY requirements.txt .
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt
+    && grep -v '^psycopg2==' requirements.txt \
+       | pip install --no-cache-dir -r /dev/stdin
 
 # Copy the full source tree (.dockerignore excludes .vagrant/, .git/, etc.)
 COPY . .
@@ -33,7 +31,8 @@ COPY . .
 # Run collectstatic with dummy env vars so Django can import settings.
 # Whitenoise serves static files directly from Gunicorn — no Nginx needed.
 # STATIC_ROOT = BASE_DIR (/build/), so static assets are copied into /build/.
-RUN DJANGO_SETTINGS_MODULE=forum-sandbox.settings \
+RUN mkdir -p logs \
+    && DJANGO_SETTINGS_MODULE=forum-sandbox.settings \
     SECRET_KEY=dummy-build-key-not-for-production \
     PG_DB=dummy \
     PG_USER=dummy \
