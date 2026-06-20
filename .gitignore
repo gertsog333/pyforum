@@ -21,8 +21,11 @@ __local_settings.py
 logs/
 *.log
 
-# Статика (генерируется автоматически)
+# Статика (генерируется автоматически collectstatic, STATIC_ROOT = BASE_DIR)
 staticfiles/
+/admin/
+/css/
+/rest_framework/
 
 # Python
 *.pyc
