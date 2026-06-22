@@ -6,13 +6,14 @@
 #   1. Wait for Vault to be healthy
 #   2. Read DB + App secrets from Vault KV v2 via curl
 #   3. Export secrets as environment variables
-#   4. Wait for PostgreSQL to accept connections
-#   5. Run Django migrations
-#   6. exec Gunicorn (replaces this shell process)
+#   4. Copy baked static files into shared volume (for Nginx)
+#   5. Wait for PostgreSQL to accept connections
+#   6. Run Django migrations
+#   7. exec Gunicorn (replaces this shell process)
 #
 # Required env vars (from docker-compose environment section):
 #   VAULT_ADDR, VAULT_TOKEN, DB_HOST, DB_PORT
-#   EMAIL_BACKEND, EMAIL_HOST, EMAIL_PORT, EMAIL_USE_TLS
+#   STATIC_ROOT, EMAIL_BACKEND, EMAIL_HOST, EMAIL_PORT, EMAIL_USE_TLS
 #   CORS_ORIGIN_WHITELIST
 # =============================================================================
 set -e
@@ -72,7 +73,16 @@ export EMAIL_HOST_PASSWORD=$(echo "${APP_SECRETS}" | \
 echo "[entrypoint] Secrets loaded from Vault."
 
 # ---------------------------------------------------------------------------
-# 4. Wait for PostgreSQL
+# 4. Copy static files into shared volume (read by Nginx at /staticfiles/)
+#    /app/staticfiles_src/ is baked into the image by docker build.
+#    /staticfiles/ is the Docker named volume shared with the nginx container.
+# ---------------------------------------------------------------------------
+echo "[entrypoint] Copying static files to shared volume /staticfiles/..."
+cp -r /app/staticfiles_src/. /staticfiles/
+echo "[entrypoint] Static files ready."
+
+# ---------------------------------------------------------------------------
+# 5. Wait for PostgreSQL
 # ---------------------------------------------------------------------------
 echo "[entrypoint] Waiting for PostgreSQL at ${DB_HOST}:${DB_PORT}..."
 until python3 - <<EOF
@@ -97,13 +107,13 @@ done
 echo "[entrypoint] PostgreSQL is ready."
 
 # ---------------------------------------------------------------------------
-# 5. Run Django migrations
+# 6. Run Django migrations
 # ---------------------------------------------------------------------------
 echo "[entrypoint] Running Django migrations..."
 python manage.py migrate --noinput
 
 # ---------------------------------------------------------------------------
-# 6. Start Gunicorn (exec replaces shell — PID 1 gets SIGTERM properly)
+# 7. Start Gunicorn (exec replaces shell — PID 1 gets SIGTERM properly)
 # ---------------------------------------------------------------------------
 echo "[entrypoint] Starting Gunicorn..."
 exec gunicorn "forum-sandbox.wsgi:application" \

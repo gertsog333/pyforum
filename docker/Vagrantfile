@@ -20,7 +20,8 @@
 #   docker compose --env-file .env.docker up --build
 #
 # Access the app at:
-#   http://localhost:8000   (forwarded from VM)
+#   http://localhost        (HTTP → redirect to HTTPS)
+#   https://localhost       (HTTPS, self-signed cert — браузер покажет предупреждение)
 #   http://localhost:8200   (Vault UI, token: root)
 # =============================================================================
 
@@ -31,7 +32,8 @@ Vagrant.configure("2") do |config|
   config.vm.define "docker-host" do |docker|
     docker.vm.hostname = "pyforum-docker-host"
     docker.vm.network "private_network", ip: "192.168.56.50"
-    docker.vm.network "forwarded_port", guest: 8000, host: 8000
+    docker.vm.network "forwarded_port", guest: 80,   host: 80
+    docker.vm.network "forwarded_port", guest: 443,  host: 443
     docker.vm.network "forwarded_port", guest: 8200, host: 8200
 
     # Mount the project root (one level up from this Vagrantfile)

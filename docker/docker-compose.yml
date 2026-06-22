@@ -1,31 +1,31 @@
 # =============================================================================
 # docker/docker-compose.yml — PyForum Docker stack
 #
-# Services (startup order):
-#   1. vault      — HashiCorp Vault dev mode (secrets storage)
+# Сервисы (порядок запуска):
+#   1. vault      — HashiCorp Vault dev mode
 #   2. db         — PostgreSQL 13
-#   3. vault-init — writes secrets to Vault once, then exits
-#   4. app        — Django + Gunicorn (reads secrets from Vault at startup)
+#   3. vault-init — записывает секреты в Vault один раз, затем выходит
+#   4. app        — Django + Gunicorn (читает секреты из Vault при старте)
+#   5. nginx      — reverse proxy, SSL termination, отдаёт статику напрямую
 #
-# Run from the docker/ directory:
+# Запуск из папки docker/:
 #   docker compose --env-file .env.docker up --build
 #
-# Exposed ports on the host:
-#   8000 — Django application
+# Порты на хосте:
+#   80   — HTTP (redirect на HTTPS)
+#   443  — HTTPS (приложение)
 #   8200 — Vault UI (http://localhost:8200, token: root)
 # =============================================================================
 
 volumes:
   pyforum_postgres:
   pyforum_media:
+  pyforum_static:
 
 services:
 
   # ---------------------------------------------------------------------------
-  # Vault — HashiCorp Vault in dev mode
-  #   - Auto-initialised and unsealed
-  #   - Root token = root (set via VAULT_DEV_ROOT_TOKEN_ID)
-  #   - KV v2 enabled at secret/ by default
+  # Vault — HashiCorp Vault в dev mode
   # ---------------------------------------------------------------------------
   vault:
     image: hashicorp/vault:latest
@@ -64,8 +64,7 @@ services:
       start_period: 10s
 
   # ---------------------------------------------------------------------------
-  # Vault Init — writes secrets to Vault exactly once, then exits (restart: no)
-  # Mounts vault-init.sh from the same docker/ directory
+  # Vault Init — записывает секреты в Vault один раз, затем выходит (restart: no)
   # ---------------------------------------------------------------------------
   vault-init:
     image: hashicorp/vault:latest
@@ -91,27 +90,28 @@ services:
 
   # ---------------------------------------------------------------------------
   # App — Django + Gunicorn
-  #   Build context is the project root (..) so Docker can copy the full source.
-  #   Secrets are fetched from Vault inside entrypoint.sh at container start.
+  #   Секреты читаются из Vault в entrypoint.sh при старте контейнера.
+  #   Статика копируется из /app/staticfiles_src/ в shared volume /staticfiles/.
+  #   Порт 8000 доступен ТОЛЬКО внутри Docker network (nginx → app:8000).
   # ---------------------------------------------------------------------------
   app:
     build:
       context: ..
       dockerfile: docker/Dockerfile
     container_name: pyforum_app
-    ports:
-      - "8000:8000"
     environment:
       VAULT_ADDR: http://vault:8200
       VAULT_TOKEN: ${VAULT_TOKEN}
       DB_HOST: db
       DB_PORT: "5432"
+      STATIC_ROOT: /staticfiles
       CORS_ORIGIN_WHITELIST: ${CORS_ORIGIN_WHITELIST}
       EMAIL_BACKEND: ${EMAIL_BACKEND}
       EMAIL_HOST: ${EMAIL_HOST}
       EMAIL_PORT: ${EMAIL_PORT}
       EMAIL_USE_TLS: ${EMAIL_USE_TLS}
     volumes:
+      - pyforum_static:/staticfiles
       - pyforum_media:/app/media
     depends_on:
       vault:
@@ -120,3 +120,31 @@ services:
         condition: service_healthy
       vault-init:
         condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c 'import socket; s=socket.socket(); s.settimeout(3); s.connect((\"localhost\",8000)); s.close()' 2>/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  # ---------------------------------------------------------------------------
+  # Nginx — reverse proxy + SSL termination + отдача статики
+  #   :80  → redirect на HTTPS
+  #   :443 → proxy_pass app:8000 для Django, /static/* из shared volume
+  #   Self-signed сертификат генерируется при первом старте контейнера.
+  # ---------------------------------------------------------------------------
+  nginx:
+    image: nginx:alpine
+    container_name: pyforum_nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx.entrypoint.sh:/nginx.entrypoint.sh:ro
+      - pyforum_static:/staticfiles:ro
+      - pyforum_media:/media:ro
+    entrypoint: ["sh", "/nginx.entrypoint.sh"]
+    depends_on:
+      app:
+        condition: service_healthy

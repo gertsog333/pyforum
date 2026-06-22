@@ -28,11 +28,12 @@ RUN pip install --no-cache-dir --upgrade pip \
 # Copy the full source tree (.dockerignore excludes .vagrant/, .git/, etc.)
 COPY . .
 
-# Run collectstatic with dummy env vars so Django can import settings.
-# Whitenoise serves static files directly from Gunicorn — no Nginx needed.
-# STATIC_ROOT = BASE_DIR (/build/), so static assets are copied into /build/.
-RUN mkdir -p logs \
+# Run collectstatic into a dedicated directory (staticfiles_src/).
+# STATIC_ROOT is passed as env var — settings.py reads it via config().
+# Nginx will serve /staticfiles_src/ content directly (faster than Whitenoise).
+RUN mkdir -p staticfiles_src logs \
     && DJANGO_SETTINGS_MODULE=forum-sandbox.settings \
+    STATIC_ROOT=/build/staticfiles_src \
     SECRET_KEY=dummy-build-key-not-for-production \
     PG_DB=dummy \
     PG_USER=dummy \
@@ -68,13 +69,20 @@ WORKDIR /app
 # Virtual env from builder
 COPY --from=builder /opt/venv /opt/venv
 
-# Application source + collected static files from builder
+# Application source from builder
 COPY --from=builder /build .
 
-# Ensure entrypoint is executable and logs dir exists
+# Baked static files from builder (separate dir, not mixed with source code)
+COPY --from=builder /build/staticfiles_src /app/staticfiles_src
+
+# Ensure entrypoint is executable, logs dir exists,
+# and /staticfiles is owned by appuser so the volume is writable at runtime.
 RUN chmod +x /app/docker/entrypoint.sh \
+    && chmod +x /app/docker/nginx.entrypoint.sh \
     && mkdir -p /app/logs \
-    && chown -R appuser:appuser /app/logs
+    && chown -R appuser:appuser /app/logs \
+    && mkdir -p /staticfiles \
+    && chown appuser:appuser /staticfiles
 
 USER appuser
 
