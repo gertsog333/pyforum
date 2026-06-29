@@ -81,9 +81,11 @@ done
 echo "[entrypoint-aws] PostgreSQL is ready."
 
 # ---------------------------------------------------------------------------
-# 5. Run Django migrations
+# 5. Run Django migrations (explicit order: contenttypes → authentication → rest)
 # ---------------------------------------------------------------------------
 echo "[entrypoint-aws] Running Django migrations..."
+python manage.py migrate contenttypes --noinput
+python manage.py migrate authentication --noinput
 python manage.py migrate --noinput
 
 # ---------------------------------------------------------------------------
