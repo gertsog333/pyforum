@@ -37,3 +37,11 @@ build/
 # Jenkins CI/CD — generated files (contain keys/env, never commit)
 jenkins-cicd/jenkins_deploy.pub
 jenkins-cicd/.env.jenkins
+
+# Terraform — never commit provider binaries, state, or credentials
+**/.terraform/
+*.tfstate
+*.tfstate.backup
+terraform/.terraform.lock.hcl
+terraform/bootstrap/.terraform.lock.hcl
+terraform/terraform.tfvars

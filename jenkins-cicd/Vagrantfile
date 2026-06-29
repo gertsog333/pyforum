@@ -1,0 +1,52 @@
+# =============================================================================
+# jenkins-cicd/Vagrantfile — Jenkins CI/CD VM
+#
+# Stage 7: Jenkins Master + Agent on a dedicated VM
+#
+# VM info:
+#   Name:  pyforum-jenkins-host
+#   IP:    192.168.56.60
+#   RAM:   3 GB
+#   CPUs:  2
+#
+# The project root is mounted into the VM at /home/vagrant/pyforum/
+# (Vagrantfile is in jenkins-cicd/, so ".." is the project root)
+#
+# IMPORTANT: Start this VM BEFORE docker/ VM so the SSH deploy key
+#            is generated before pyforum-docker-host provisions.
+#            If docker/ VM is already running — run from docker/ dir:
+#              vagrant provision
+#
+# Usage:
+#   cd jenkins-cicd
+#   vagrant up
+#
+# Access:
+#   http://localhost:8080   — Jenkins UI
+#   Initial admin password:
+#     vagrant ssh -c "docker exec pyforum_jenkins_master \
+#       cat /var/jenkins_home/secrets/initialAdminPassword"
+# =============================================================================
+
+Vagrant.configure("2") do |config|
+  config.vm.box = "oraclelinux/9"
+  config.vm.box_url = "https://oracle.github.io/vagrant-projects/boxes/oraclelinux/9.json"
+
+  config.vm.define "jenkins-host" do |jenkins|
+    jenkins.vm.hostname = "pyforum-jenkins-host"
+    jenkins.vm.network "private_network", ip: "192.168.56.60"
+    jenkins.vm.network "forwarded_port", guest: 8080, host: 8080
+
+    # Mount the project root (one level up from this Vagrantfile)
+    jenkins.vm.synced_folder "..", "/home/vagrant/pyforum"
+
+    jenkins.vm.provider "virtualbox" do |vb|
+      vb.name   = "pyforum-jenkins-host"
+      vb.memory = "3072"
+      vb.cpus   = 2
+    end
+
+    # Provision: Docker CE + Docker Compose, SSH deploy key, Jenkins containers
+    jenkins.vm.provision "shell", path: "provision.sh"
+  end
+end

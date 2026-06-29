@@ -34,6 +34,8 @@ services:
       EMAIL_HOST: ${EMAIL_HOST}
       EMAIL_PORT: ${EMAIL_PORT}
       EMAIL_USE_TLS: ${EMAIL_USE_TLS}
+      EMAIL_HOST_USER: ${EMAIL_HOST_USER}
+      EMAIL_HOST_PASSWORD: ${EMAIL_HOST_PASSWORD}
       AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-eu-central-1}
     volumes:
       - pyforum_static:/staticfiles
