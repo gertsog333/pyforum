@@ -11,7 +11,7 @@ env
 __pycache__/
 /FrontEnd/node_modules
 __local_settings.py
-/*/migrations/
+# migrations tracked in git — do NOT exclude
 .coverage
 
 # Vagrant — содержит приватные SSH ключи и состояние VM, не коммитить!
