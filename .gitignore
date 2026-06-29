@@ -34,3 +34,6 @@ staticfiles/
 *.egg-info/
 dist/
 build/
+# Jenkins CI/CD — generated files (contain keys/env, never commit)
+jenkins-cicd/jenkins_deploy.pub
+jenkins-cicd/.env.jenkins

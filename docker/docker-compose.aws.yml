@@ -1,0 +1,63 @@
+# =============================================================================
+# docker/docker-compose.aws.yml — PyForum AWS deployment
+#
+# Differences from docker-compose.yml:
+#   - No Vault service
+#   - No local PostgreSQL (uses RDS via DB_HOST)
+#   - App reads secrets from AWS Secrets Manager (entrypoint.aws.sh)
+#   - Nginx uses Cloudflare Origin Certificate from host volume
+#
+# Run:
+#   docker compose --env-file .env.aws -f docker-compose.aws.yml up --build -d
+#
+# .env.aws must contain:
+#   DB_HOST, DB_PORT, CORS_ORIGIN_WHITELIST, EMAIL_*, AWS_DEFAULT_REGION
+# =============================================================================
+
+volumes:
+  pyforum_media:
+  pyforum_static:
+
+services:
+
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.aws
+    container_name: pyforum_app
+    environment:
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT:-5432}
+      STATIC_ROOT: /staticfiles
+      CORS_ORIGIN_WHITELIST: ${CORS_ORIGIN_WHITELIST}
+      EMAIL_BACKEND: ${EMAIL_BACKEND}
+      EMAIL_HOST: ${EMAIL_HOST}
+      EMAIL_PORT: ${EMAIL_PORT}
+      EMAIL_USE_TLS: ${EMAIL_USE_TLS}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-eu-central-1}
+    volumes:
+      - pyforum_static:/staticfiles
+      - pyforum_media:/app/media
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c 'import socket; s=socket.socket(); s.settimeout(3); s.connect((\"localhost\",8000)); s.close()' 2>/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 60s
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    container_name: pyforum_nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.aws.conf:/etc/nginx/conf.d/default.conf:ro
+      - /opt/pyforum/certs:/etc/nginx/certs:ro
+      - pyforum_static:/staticfiles:ro
+      - pyforum_media:/media:ro
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped
