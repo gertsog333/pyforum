@@ -54,7 +54,7 @@ pipeline {
                     sh """
                         ssh -o StrictHostKeyChecking=no \\
                             ${DEPLOY_USER}@${params.APP_EC2_IP} \\
-                            "cd ${DEPLOY_DIR} && git pull && docker compose --env-file .env.aws -f docker-compose.aws.yml up --build -d"
+                            "cd /home/ec2-user/pyforum && git fetch origin && git reset --hard origin/main && cd ${DEPLOY_DIR} && docker compose --env-file .env.aws -f docker-compose.aws.yml up --build -d"
                     """
                 }
             }
