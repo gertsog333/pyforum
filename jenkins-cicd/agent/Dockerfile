@@ -23,4 +23,6 @@ RUN apt-get update && apt-get install -y \
     --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
-USER jenkins
+# NOTE: Do NOT add USER jenkins here.
+# The base jenkins/ssh-agent entrypoint (setup-sshd) must run as root
+# to start sshd on port 22. sshd itself handles privilege drop for sessions.
