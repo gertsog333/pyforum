@@ -51,3 +51,22 @@ DATABASES = {
         "NAME":   ":memory:",
     }
 }
+
+# ---------------------------------------------------------------------------
+# Override: LOGGING — replace file handler with console (no logs/ dir in CI)
+# ---------------------------------------------------------------------------
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+        },
+    },
+    "loggers": {
+        "django": {
+            "handlers": ["console"],
+            "level": "ERROR",
+        },
+    },
+}
