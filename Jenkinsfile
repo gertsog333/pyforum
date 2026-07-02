@@ -37,8 +37,7 @@ pipeline {
         stage('Test') {
             steps {
                 sh '''
-                    grep -v "^psycopg2" requirements.txt \
-                        | pip3 install --no-cache-dir --break-system-packages -r /dev/stdin
+                    pip3 install --no-cache-dir --break-system-packages -r requirements-test.txt
                     python3 manage.py test \
                         --settings=forum-sandbox.test_settings \
                         --verbosity=2
